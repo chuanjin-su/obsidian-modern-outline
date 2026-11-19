@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - "*"
+    # Push release/<version> to publish the corresponding existing tag.
+    branches:
+      - "release/*"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -17,7 +20,25 @@ jobs:
       attestations: write # needed to write the attestation to the repo
 
     steps:
+      - name: Resolve release tag
+        id: release
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          tag="$REF_NAME"
+          if [[ "$REF_TYPE" == branch ]]; then
+            tag="${REF_NAME#release/}"
+            if [[ ! "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Expected a release branch named release/<major>.<minor>.<patch>." >&2
+              exit 1
+            fi
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4.2.2
+        with:
+          ref: refs/tags/${{ steps.release.outputs.tag }}
 
       - name: Use Node.js
         uses: actions/setup-node@v4.4.0
@@ -25,11 +46,16 @@ jobs:
           node-version: "22"
 
       - name: Build
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
-          npm install
+          node -e 'if (require("./manifest.json").version !== process.env.RELEASE_TAG) throw new Error("Release tag must match the manifest version")'
+          npm ci
           npm run build
 
       - name: Attest build provenance
+        # A publication branch runs a workflow from a different ref than the build source.
+        if: github.ref_type == 'tag'
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
@@ -40,11 +66,11 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2.3.2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          draft: true
+          tag_name: ${{ steps.release.outputs.tag }}
+          name: ${{ steps.release.outputs.tag }}
+          draft: ${{ github.ref_type == 'tag' }}
           prerelease: false
-          fail_on_unmatched_files: false
+          fail_on_unmatched_files: true
           files: |
             main.js
             manifest.json

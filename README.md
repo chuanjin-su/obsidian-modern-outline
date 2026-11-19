@@ -10,7 +10,8 @@ A modern minimap outline for [Obsidian](https://obsidian.md). Displays your note
 
 - Marker strip overlaid directly on the note, no sidebar panel needed.
 - Different marker shapes.
-- Hover the strip to reveal all heading labels.
+- Hover the compact marker strip to spread out the markers and reveal their heading labels.
+- Move across the headings to preview each section in a card with a one-line title and up to two lines of section text.
 - Active heading highlighted as you scroll, works in both editing and reading mode.
 - Click any marker or label to jump to that heading.
 - Labels always visible mode: skip the hover, show labels at all times.
@@ -25,7 +26,7 @@ A modern minimap outline for [Obsidian](https://obsidian.md). Displays your note
 
 ## Usage
 
-Open any note — the outline strip appears automatically on the edge of the note. Hover the strip to reveal heading labels with a slide animation, then click any label to jump to that heading.
+Open any note — the outline strip appears automatically on the edge of the note. Hover the strip to reveal heading labels, then move across to the labels and click one to jump to its heading.
 
 Use the ribbon icon or the command **Modern Outline: Toggle** to show or hide the strip.
 

@@ -1,14 +1,19 @@
-import { App, debounce, MarkdownView, Platform, TFile } from 'obsidian';
+import { App, CachedMetadata, debounce, HeadingCache, MarkdownView, Platform, TFile } from 'obsidian';
 import type ModernOutlinePlugin from '../main';
-import { cleanHeadingText, getHeadings, HeadingInfo } from '../utils/headings';
+import { cleanHeadingText, getHeadingExcerpts } from '../utils/headings';
 
 export class OverlayOutline {
 	private overlayEl: HTMLElement | null = null;
 	private currentView: MarkdownView | null = null;
-	private headings: HeadingInfo[] = [];
+	private headings: HeadingCache[] = [];
+	private rows: HTMLElement[] = [];
+	private activeRow: HTMLElement | null = null;
+	private previewRow: HTMLElement | null = null;
+	private hoveredRow: HTMLElement | null = null;
+	private treeLines: { line: HTMLElement; parent: HTMLElement; lastChild: HTMLElement }[] = [];
+	private layoutObserver = new ResizeObserver(() => this.updateLayout());
 	private refreshTimer: number | null = null;
 	private _enabled = true;
-	private scrollHandler: ((event: Event) => void) | null = null;
 	private animateNextRefresh = false;
 
 	constructor(private app: App, private plugin: ModernOutlinePlugin) {
@@ -49,15 +54,29 @@ export class OverlayOutline {
 			const scroller = this.getNoteScroller(view);
 			if (!scroller) return;
 			e.preventDefault();
+			this.clearHoverPreview();
 			// Normalize delta: 0 = pixels, 1 = lines, 2 = pages.
 			const factor = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? scroller.clientHeight : 1;
 			scroller.scrollTop += e.deltaY * factor;
 		}, { passive: false });
 
-		// On touch, just stop the strip from scrolling on its own.
-		overlay.addEventListener('touchmove', (e: Event) => {
-			if (overlay.classList.contains('overlay-scroll')) e.preventDefault();
-		}, { passive: false });
+		overlay.addEventListener('mouseenter', () => {
+			overlay.classList.remove('outline-peek', 'outline-peek-labels');
+		});
+
+		// Pointer movement selects the card. Reflow can fire pointerover on a
+		// different row even while the pointer is stationary.
+		overlay.addEventListener('pointermove', (event) => {
+			if (event.pointerType === 'touch') return;
+			const row = (event.target as HTMLElement).closest<HTMLElement>('.outline-row');
+			if (!row) return;
+			this.hoveredRow = row;
+			this.setPreviewRow(row);
+		});
+		overlay.addEventListener('pointerleave', () => {
+			this.clearHoverPreview();
+			this.updateLayout();
+		});
 
 		// Play the entry animation only when attaching to a (new) note, not on
 		// the content/layout refreshes that happen while editing.
@@ -67,10 +86,20 @@ export class OverlayOutline {
 
 	detach() {
 		if (this.refreshTimer) window.clearTimeout(this.refreshTimer);
+		this.resetRows();
 		this.overlayEl?.remove();
 		this.overlayEl = null;
 		this.currentView = null;
+	}
+
+	private resetRows() {
+		this.layoutObserver.disconnect();
 		this.headings = [];
+		this.rows = [];
+		this.activeRow = null;
+		this.previewRow = null;
+		this.hoveredRow = null;
+		this.treeLines = [];
 	}
 
 	scheduleRefresh(delay = 300) {
@@ -83,8 +112,10 @@ export class OverlayOutline {
 		const overlay = this.overlayEl;
 		if (!view || !overlay) return;
 
+		this.resetRows();
 		overlay.empty();
 		overlay.className = 'modern-outline-overlay';
+		if (Platform.isMobile) overlay.classList.add('outline-mobile');
 		overlay.classList.add(
 			this.plugin.settings.sidebarSide === 'left' ? 'overlay-left' : 'overlay-right'
 		);
@@ -107,10 +138,12 @@ export class OverlayOutline {
 		if (animate && isNewNote) overlay.classList.add('outline-animate-in');
 		this.animateNextRefresh = false;
 
-		if (!view.file) return;
+		const file = view.file;
+		const metadata = file && this.app.metadataCache.getFileCache(file);
+		if (!file || !metadata?.headings) return;
 
 		const { minHeadingLevel, maxHeadingLevel } = this.plugin.settings;
-		this.headings = getHeadings(this.app, view.file).filter(
+		this.headings = metadata.headings.filter(
 			h => h.level >= minHeadingLevel && h.level <= maxHeadingLevel
 		);
 
@@ -120,46 +153,54 @@ export class OverlayOutline {
 		// stagger so labels/dashes animate together instead.
 		if (this.headings.length > 30) overlay.classList.add('outline-no-stagger');
 
-		// Each heading is a row: dash + label. Hovering anywhere on the overlay
-		// fades in every label at once, via CSS :has().
-		this.headings.forEach((h, i) => {
+		const excerpts = new Map<HeadingCache, HTMLElement>();
+		this.rows = this.headings.map((h, i) => {
 			const row = overlay.createDiv({ cls: 'outline-row' });
-			row.dataset.index = String(i);
 			row.style.setProperty('--i', String(i)); // cascade order, inherited by dash + label
-			row.createSpan({ cls: `outline-label outline-label--h${h.level}`, text: cleanHeadingText(h.heading) });
-			row.createDiv({ cls: `outline-dash outline-dash--h${h.level}` });
+			const marker = row.createDiv({ cls: 'outline-marker' });
+			marker.createDiv({ cls: `outline-dash outline-dash--h${h.level}` });
+			const label = row.createDiv({ cls: 'outline-label-box' });
+			label.createSpan({
+				cls: `outline-label outline-label--h${h.level}`,
+				text: cleanHeadingText(h.heading),
+				attr: { dir: 'auto' },
+			});
+			excerpts.set(h, label.createDiv({ cls: 'outline-excerpt', attr: { dir: 'auto' } }));
 			row.addEventListener('click', () => this.scrollToHeading(h, view));
+			return row;
 		});
 
-		this.applyLayout(view);
 		this.buildTreeLines();
+		this.layoutObserver.observe(overlay);
 		this.highlightCurrentHeading();
+		void this.loadExcerpts(file, metadata, excerpts);
 
-		if (markerVisibility === 'peek' && isNewNote) {
+		if (markerVisibility === 'peek' && isNewNote && !overlay.matches(':hover')) {
 			overlay.classList.add('outline-peek');
-			// Dedicated class — never reuse outline-labels-always-on, so this leak-prone
-			// once-listener can only ever remove peek-specific classes (harmless in any
-			// other mode if it fires late on the reused overlay element).
 			if (this.plugin.settings.labelsAlwaysOn) overlay.classList.add('outline-peek-labels');
-			overlay.addEventListener('mouseenter', () => {
+			overlay.lastElementChild?.querySelector('.outline-dash')?.addEventListener('animationend', () => {
 				overlay.classList.remove('outline-peek', 'outline-peek-labels');
 			}, { once: true });
 		}
 	}
 
-	// Injects absolutely-positioned vertical line elements that connect each
-	// parent heading's midpoint to its last child's midpoint. Runs after
-	// applyLayout so offsetTop values reflect the final padding/sizes.
+	private async loadExcerpts(file: TFile, metadata: CachedMetadata, excerpts: Map<HeadingCache, HTMLElement>) {
+		const { headings, sections } = metadata;
+		if (!headings || !sections?.length) return;
+		const rows = this.rows;
+		const markdown = await this.app.vault.cachedRead(file).catch(() => null);
+		if (markdown === null || this.rows !== rows || this.currentView?.file !== file) return;
+
+		for (const [heading, text] of getHeadingExcerpts(markdown, headings, sections)) {
+			const excerpt = excerpts.get(heading);
+			if (excerpt) excerpt.textContent = text;
+		}
+	}
+
+	// Connect each parent row to its last descendant. Heights follow the rows
+	// when the active card opens, closes, or moves to a different heading.
 	private buildTreeLines() {
-		const overlay = this.overlayEl;
-		if (!overlay || !this.plugin.settings.treeLines) return;
-
-		if (this.headings.length > 30) return;
-
-		const rows = Array.from(overlay.querySelectorAll<HTMLElement>('.outline-row'));
-		const isRight = this.plugin.settings.sidebarSide === 'right';
-		const labelGap = parseFloat(getComputedStyle(overlay).getPropertyValue('--label-gap')) || 4;
-		const indentStep = 8;
+		if (!this.plugin.settings.treeLines || this.headings.length > 30) return;
 
 		for (let i = 0; i < this.headings.length; i++) {
 			const parentHeading = this.headings[i];
@@ -175,67 +216,33 @@ export class OverlayOutline {
 			}
 			if (lastChildIdx < 0) continue;
 
-			const parentRow = rows[i];
-			const lastChildRow = rows[lastChildIdx];
+			const parentRow = this.rows[i];
+			const lastChildRow = this.rows[lastChildIdx];
 			if (!parentRow || !lastChildRow) continue;
 
-			// Height = distance from parent row center to last child row center.
-			// offsetTop values are relative to the overlay (shared offset parent).
-			const lineHeight =
-				(lastChildRow.offsetTop + lastChildRow.offsetHeight / 2) -
-				(parentRow.offsetTop + parentRow.offsetHeight / 2);
-			if (lineHeight <= 0) continue;
-
-			// Horizontal offset from the near edge of the row, into the label area.
-			const rowWidth = parentRow.offsetWidth;
-			const offsetFromEdge = rowWidth + labelGap + (parentLevel - 1) * indentStep + indentStep / 2 - 4;
-
-			// The line is a child of its parent row so it inherits --i and --stagger
-			// automatically — no manual copy needed, and it animates in sync with
-			// the row's label regardless of whether stagger is on or off.
 			const line = parentRow.createDiv({ cls: 'outline-tree-line' });
-			let matchColor = '';
+			line.style.setProperty('--tree-indent', `${(parentLevel - 1) * 8 + 4}px`);
 			if (this.plugin.settings.treeLineColor === 'match') {
 				const label = parentRow.querySelector<HTMLElement>('.outline-label');
-				if (label) matchColor = `background-color: ${getComputedStyle(label).color};`;
+				if (label) line.style.backgroundColor = getComputedStyle(label).color;
 			}
-			const transform = isRight
-				? 'translateX(var(--label-nudge))'
-				: 'translateX(calc(-1 * var(--label-nudge)))';
-			const side = isRight ? `right: ${offsetFromEdge}px` : `left: ${offsetFromEdge}px`;
-			line.setAttribute('style', `top: 112%; height: ${lineHeight - 4}px; transform: ${transform}; ${side}; ${matchColor}`);
+			this.treeLines.push({ line, parent: parentRow, lastChild: lastChildRow });
 		}
 	}
 
-	// Computes how many rungs fit in the available height (reserving headroom so
-	// labels are never clipped mid-row). If all headings fit, spreads them with
-	// dynamic padding — no scroll. If there are more headings than fit even at
-	// minimum spacing, falls back to a scrollable strip that keeps the active
-	// rung in view, so no headings are ever dropped.
-	private applyLayout(view: MarkdownView) {
+	private updateLayout() {
 		const overlay = this.overlayEl;
 		if (!overlay) return;
 
-		const containerHeight = view.contentEl.clientHeight;
-		const cap = containerHeight * (Platform.isMobile ? 0.6 : 0.85);
-		const headroom = 10; // ≈ half a label height, top and bottom
-		const usable = Math.max(0, cap - headroom * 2);
-
-		const dashHeight = 2;
-		const padding = 6; // fixed row padding
-		const minRow = dashHeight + padding * 2; // 14px
-		const count = this.headings.length;
-
-		const maxRungs = Math.max(1, Math.floor(usable / minRow));
-		const overflowing = count > maxRungs;
-
-		overlay.style.paddingBlock = `${headroom}px`;
-		overlay.classList.toggle('overlay-scroll', overflowing);
-		overlay.style.maxHeight = overflowing ? `${cap}px` : '';
-
-		overlay.querySelectorAll<HTMLElement>('.outline-row').forEach(row => {
-			row.style.paddingBlock = `${padding}px`;
-		});
+		const row = this.activeRow;
+		const lineHeights = this.treeLines.map(({ line, parent, lastChild }) => ({
+			line,
+			height: lastChild.offsetTop + lastChild.offsetHeight / 2 - parent.offsetTop - parent.offsetHeight,
+		}));
+		if (row && !this.hoveredRow && overlay.scrollHeight > overlay.clientHeight) {
+			overlay.scrollTop = row.offsetTop + (row.offsetHeight - overlay.clientHeight) / 2;
+		}
+		for (const { line, height } of lineHeights) line.style.height = `${height}px`;
 	}
 
 	// The note's scrollable element — the CodeMirror scroller in editing mode,
@@ -251,7 +258,7 @@ export class OverlayOutline {
 			?? view.contentEl.querySelector<HTMLElement>('.cm-scroller');
 	}
 
-	private scrollToHeading(h: HeadingInfo, view: MarkdownView) {
+	private scrollToHeading(h: HeadingCache, view: MarkdownView) {
 		const line = h.position.start.line;
 		if (!(view.file instanceof TFile)) return;
 		const file = view.file;
@@ -282,7 +289,6 @@ export class OverlayOutline {
 			this.highlightCurrentHeading();
 		}, 0);
 
-		this.scrollHandler = handler;
 		// `activeWindow` accounts for pop-out windows; capture = true.
 		this.plugin.registerDomEvent(
 			activeWindow.document as unknown as HTMLElement,
@@ -295,7 +301,7 @@ export class OverlayOutline {
 	// Reads the top visible line via view.currentMode.getScroll() — identical
 	// in both editing and reading modes — and binary-searches the closest
 	// heading. closestIndex starts at 0 so the first heading is always active.
-	highlightCurrentHeading() {
+	private highlightCurrentHeading() {
 		if (!this._enabled) return;
 		const view = this.currentView;
 		const overlay = this.overlayEl;
@@ -328,21 +334,33 @@ export class OverlayOutline {
 		this.setActiveItem(closestIndex);
 	}
 
-	setActiveItem(index: number) {
-		const overlay = this.overlayEl;
-		if (!overlay) return;
+	private setActiveItem(index: number) {
+		const row = this.rows[index];
+		if (!row || row === this.activeRow) return;
 
-		const rows = overlay.querySelectorAll<HTMLElement>('.outline-row');
-		rows.forEach((el, i) => {
-			el.classList.toggle('is-active', i === index);
-		});
+		this.activeRow?.classList.remove('is-active');
+		this.activeRow = row;
+		row.classList.add('is-active');
+		if (!this.hoveredRow) this.setPreviewRow(row);
+	}
 
-		// In scroll mode keep the active rung centered.
-		if (overlay.classList.contains('overlay-scroll')) {
-			const row = rows[index];
-			if (row) {
-				overlay.scrollTop = row.offsetTop + row.offsetHeight / 2 - overlay.clientHeight / 2;
-			}
+	private setPreviewRow(row: HTMLElement | null) {
+		if (row === this.previewRow) return;
+
+		if (this.previewRow) {
+			this.layoutObserver.unobserve(this.previewRow);
+			this.previewRow.classList.remove('has-preview');
 		}
+		this.previewRow = row;
+		if (row) {
+			row.classList.add('has-preview');
+			this.layoutObserver.observe(row);
+		}
+	}
+
+	private clearHoverPreview() {
+		if (!this.hoveredRow) return;
+		this.hoveredRow = null;
+		this.setPreviewRow(this.activeRow);
 	}
 }

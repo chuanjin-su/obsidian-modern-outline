@@ -1,9 +1,9 @@
 {
-	"id": "modern-outline",
-	"name": "Modern Outline",
-	"version": "0.1.0",
+	"id": "modern-outline-enhanced",
+	"name": "Modern Outline Enhanced",
+	"version": "0.1.1",
 	"minAppVersion": "1.0.0",
 	"description": "A modern minimap outline for your notes.",
-	"author": "KreNtal",
+	"author": "Chuanjin Su",
 	"isDesktopOnly": false
 }

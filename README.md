@@ -1,6 +1,8 @@
-# Modern Outline
+# Modern Outline Enhanced
 
 A modern minimap outline for [Obsidian](https://obsidian.md). Displays your note's headings as small markers overlaid on the edge of the note, hover to reveal heading names, click to jump.
+
+Forked from [Modern Outline by KreNtal](https://github.com/KreNtal/obsidian-modern-outline).
 
 <p align="center">
     <img src="docs/demo.gif">
@@ -28,9 +30,9 @@ A modern minimap outline for [Obsidian](https://obsidian.md). Displays your note
 
 Open any note — the outline strip appears automatically on the edge of the note. Hover the strip to reveal heading labels, then move across to the labels and click one to jump to its heading.
 
-Use the ribbon icon or the command **Modern Outline: Toggle** to show or hide the strip.
+Use the ribbon icon or the command **Modern Outline Enhanced: Toggle** to show or hide the strip.
 
-All visual options are under **Settings → Community plugins → Modern Outline**:
+All visual options are under **Settings → Community plugins → Modern Outline Enhanced**:
 
 - **Layout** — left/right side, vertical alignment, and animations on/off
 - **Markers** — style (Dash, Pill, Circle, Diamond, Literal, Hash), size, and color theme
@@ -39,16 +41,20 @@ All visual options are under **Settings → Community plugins → Modern Outline
 
 ## Installation
 
-### From the community plugin list
+### With BRAT
 
-1. Open **Settings → Community plugins → Browse**
-2. Search for **Modern Outline** and install it
-3. Enable it in **Settings → Community plugins**
+1. Install and enable **BRAT** from **Community plugins**.
+2. In **Settings → BRAT**, select **Add beta plugin**, enter `chuanjin-su/obsidian-modern-outline`, and choose **Latest version** once release `0.1.1` or newer is available.
+3. Enable **Modern Outline Enhanced** under **Settings → Community plugins**.
+
+The fork uses the ID `modern-outline-enhanced`. Obsidian's community catalog associates `modern-outline` with the upstream plugin, so BRAT can manage the fork independently.
+
+If you already use this fork's `0.1.0` release, disable the old entry and copy its `data.json` from `.obsidian/plugins/modern-outline/` into `.obsidian/plugins/modern-outline-enhanced/` after installation and before enabling the new entry. Reassign any custom hotkey for the toggle command under **Settings → Hotkeys**.
 
 ### Manual
 
-1. Download `main.js`, `styles.css`, `manifest.json` from the [latest release](../../releases/latest)
-2. Copy them into `<vault>/.obsidian/plugins/modern-outline/`
+1. Download `main.js`, `styles.css`, and `manifest.json` from [release `0.1.1` or newer](../../releases)
+2. Copy them into `<vault>/.obsidian/plugins/modern-outline-enhanced/`
 3. Reload Obsidian and enable the plugin in **Settings → Community plugins**
 
 # Motivation

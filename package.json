@@ -1,6 +1,6 @@
 {
-	"name": "obsidian-modern-outline",
-	"version": "0.1.0",
+	"name": "obsidian-modern-outline-enhanced",
+	"version": "0.1.1",
 	"description": "A modern minimap outline for Obsidian notes.",
 	"main": "main.js",
 	"type": "module",
@@ -11,15 +11,15 @@
 		"fix": "eslint . --fix",
 		"version": "node version-bump.mjs && git add manifest.json versions.json"
 	},
-	"author": "KreNtal",
+	"author": "Chuanjin Su",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/KreNtal/obsidian-modern-outline.git"
+		"url": "git+https://github.com/chuanjin-su/obsidian-modern-outline.git"
 	},
 	"bugs": {
-		"url": "https://github.com/KreNtal/obsidian-modern-outline/issues"
+		"url": "https://github.com/chuanjin-su/obsidian-modern-outline/issues"
 	},
-	"homepage": "https://github.com/KreNtal/obsidian-modern-outline#readme",
+	"homepage": "https://github.com/chuanjin-su/obsidian-modern-outline#readme",
 	"license": "MIT",
 	"devDependencies": {
 		"@types/node": "^16.11.6",

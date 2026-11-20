@@ -11,7 +11,7 @@ export default class ModernOutlinePlugin extends Plugin {
 
 		this.overlay = new OverlayOutline(this.app, this);
 
-		this.addRibbonIcon('list', 'Toggle modern outline', () => {
+		this.addRibbonIcon('list', 'Toggle modern outline enhanced', () => {
 			this.overlay.toggle();
 		});
 
